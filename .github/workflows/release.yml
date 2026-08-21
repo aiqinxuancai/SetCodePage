@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  release:
+    name: Test, build, and release
+    # The Windows 2022 image includes the VS 2022 ARM64 linker required by Native AOT.
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Tag '$env:GITHUB_REF_NAME' must be a semantic version such as v1.2.3 or v1.2.3-beta.1."
+          }
+
+      - name: Restore
+        run: dotnet restore SetCodePage.slnx
+
+      - name: Test
+        run: dotnet test --solution SetCodePage.slnx --configuration Release --no-restore --output Normal
+
+      - name: Publish Native AOT packages
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $rids = @('win-x64', 'win-x86', 'win-arm64')
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+
+          foreach ($rid in $rids) {
+            $publishDirectory = Join-Path artifacts "publish-$rid"
+            dotnet publish src/SetCodePage/SetCodePage.csproj `
+              --configuration Release `
+              --runtime $rid `
+              --no-restore `
+              --output $publishDirectory `
+              -p:Version=$version
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native AOT publish failed for $rid."
+            }
+
+            $nativeExecutable = Join-Path $publishDirectory 'SetCodePage.exe'
+            if (-not (Test-Path -LiteralPath $nativeExecutable -PathType Leaf)) {
+              throw "Native AOT output is missing for $rid."
+            }
+
+            $managedLibraries = @(Get-ChildItem $publishDirectory -Filter '*.dll' -File)
+            if ($managedLibraries.Count -ne 0) {
+              throw "Publish output for $rid contains managed DLLs and is not a standalone Native AOT executable."
+            }
+
+            Copy-Item README.md, LICENSE -Destination $publishDirectory
+            Compress-Archive `
+              -Path $nativeExecutable, "$publishDirectory/README.md", "$publishDirectory/LICENSE" `
+              -DestinationPath "artifacts/SetCodePage-$version-$rid.zip"
+            Remove-Item -LiteralPath $publishDirectory -Recurse -Force
+          }
+
+          Get-ChildItem artifacts -Filter '*.zip' | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
+
+      - name: Smoke test x64 binary
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $smokeDirectory = Join-Path $env:RUNNER_TEMP 'set-codepage-smoke'
+          Expand-Archive "artifacts/SetCodePage-$version-win-x64.zip" -DestinationPath $smokeDirectory
+          & "$smokeDirectory/SetCodePage.exe" --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Published x64 executable failed its smoke test.'
+          }
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem artifacts -File | ForEach-Object FullName)
+          $arguments = @(
+            'release', 'create', $env:GITHUB_REF_NAME
+          ) + $assets + @(
+            '--title', "SetCodePage $env:GITHUB_REF_NAME",
+            '--generate-notes',
+            '--verify-tag'
+          )
+
+          if ($env:GITHUB_REF_NAME.Contains('-')) {
+            $arguments += '--prerelease'
+          }
+
+          gh @arguments

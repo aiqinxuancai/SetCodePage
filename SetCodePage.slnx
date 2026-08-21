@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/SetCodePage/SetCodePage.csproj" />
+  <Project Path="tests/SetCodePage.Tests/SetCodePage.Tests.csproj" />
+</Solution>
