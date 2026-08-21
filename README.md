@@ -1,6 +1,6 @@
 # SetCodePage
 
-给旧的非 Unicode Windows 程序设置进程代码页，让它在 Windows 11 上不再乱码。
+给旧的非 Unicode Windows 程序设置进程代码页，修复其中依赖进程 ANSI 代码页的乱码路径。
 
 工具会在 EXE 的内嵌 manifest 中写入 `activeCodePage`（默认 `zh-CN`），使 Windows 按简体中文 ANSI 代码页运行该进程 —— 不必修改系统区域设置，也不影响其他程序。
 
@@ -75,6 +75,7 @@ Windows 10 及更早的系统只支持 `UTF-8`，设置区域名称不会有任�
 - 无 manifest 时自动创建；已有 manifest 时保留原有权限、DPI、兼容性等全部节点
 - 已有 `activeCodePage` 时更新其值
 - 更新所有语言版本的 `RT_MANIFEST / #1` 资源
+- 检测到 `DrawTextA`、`TextOutA` 等 ANSI GDI 绘字接口时给出兼容性警告；这类路径通常还需要 Locale Emulator 等运行时 hook
 - 支持 PE32 与 PE32+，工具位数不必与目标程序一致
 - 原地更新默认创建 `<原文件>.bak`；备份或输出文件已存在时拒绝覆盖，除非 `--force`
 - manifest XML 会规范化为 UTF-8 并重新缩进，但保留原有节点与属性的语义

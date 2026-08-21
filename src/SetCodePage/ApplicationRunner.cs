@@ -96,13 +96,24 @@ internal static class ApplicationRunner
             AnsiConsole.MarkupLine(
                 "[yellow]注意：按进程指定非 UTF-8 区域代码页需要 Windows 11 或 Windows Server 2022 及以上版本。[/]");
         }
+
+        if (plan.RequiresRuntimeHook)
+        {
+            var imports = Escape(string.Join(", ", plan.AnsiGdiTextImports));
+            AnsiConsole.MarkupLine(
+                $"[yellow]兼容性警告：检测到 ANSI GDI 绘字接口 {imports}。这些接口可能按字体 charset 解码；仅写入 activeCodePage 后仍可能乱码。此类程序需要 Locale Emulator 等运行时 locale hook，或修改目标程序。[/]");
+        }
     }
 
     private static void WriteOutcome(PatchPlan plan, PatchOutcome outcome)
     {
         if (!plan.HasChanges && !outcome.FileWritten)
         {
-            AnsiConsole.MarkupLine("[green]✓[/] Manifest 已是目标代码页，无需修改。");
+            var qualification = plan.RequiresRuntimeHook
+                ? "；这只表示补丁存在，不保证 ANSI GDI 绘字路径生效"
+                : string.Empty;
+            AnsiConsole.MarkupLine(
+                $"[green]✓[/] Manifest 已是目标代码页，无需修改{qualification}。");
             return;
         }
 

@@ -6,9 +6,12 @@ internal sealed record PatchPlan(
     string InputPath,
     string CodePage,
     bool HadManifest,
-    IReadOnlyList<ResourcePatch> Resources)
+    IReadOnlyList<ResourcePatch> Resources,
+    IReadOnlyList<string> AnsiGdiTextImports)
 {
     public bool HasChanges => Resources.Any(resource => resource.Change != ManifestChange.Unchanged);
+
+    public bool RequiresRuntimeHook => AnsiGdiTextImports.Count > 0;
 }
 
 internal sealed record PatchOutcome(string DestinationPath, string? BackupPath, bool FileWritten);
@@ -23,6 +26,7 @@ internal static class PatchService
             throw new FileNotFoundException("找不到输入文件。", fullInputPath);
         }
 
+        var ansiGdiTextImports = PeCompatibilityAnalyzer.FindAnsiGdiTextImports(fullInputPath);
         var resources = PeManifestResources.Read(fullInputPath);
         if (resources.Count == 0)
         {
@@ -31,7 +35,8 @@ internal static class PatchService
                 fullInputPath,
                 codePage,
                 HadManifest: false,
-                [new ResourcePatch(0, created.Data, created.Change)]);
+                [new ResourcePatch(0, created.Data, created.Change)],
+                ansiGdiTextImports);
         }
 
         var patches = new List<ResourcePatch>(resources.Count);
@@ -41,7 +46,12 @@ internal static class PatchService
             patches.Add(new ResourcePatch(resource.Language, transformed.Data, transformed.Change));
         }
 
-        return new PatchPlan(fullInputPath, codePage, HadManifest: true, patches);
+        return new PatchPlan(
+            fullInputPath,
+            codePage,
+            HadManifest: true,
+            patches,
+            ansiGdiTextImports);
     }
 
     public static PatchOutcome Apply(
